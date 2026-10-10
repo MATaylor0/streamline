@@ -1,0 +1,23 @@
+{
+  "name": "streamline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Streamline - enterprise process mapping platform with UI, REST API and MCP access over one shared core.",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/server",
+    "packages/web"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @streamline/server",
+    "dev:web": "npm run dev -w @streamline/web",
+    "build": "npm run build -w @streamline/web && npm run build -w @streamline/server",
+    "start": "npm run start -w @streamline/server",
+    "test": "npm run test -w @streamline/server",
+    "typecheck": "npm run typecheck -w @streamline/server && npm run typecheck -w @streamline/web",
+    "lint": "npm run typecheck"
+  }
+}
