@@ -98,11 +98,10 @@ export interface Config extends RawConfig {
 
 function resolveFileVars(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
   const out: Record<string, string | undefined> = { ...env };
-  for (const [key, value] of Object.entries(env)) {
-    if (key.endsWith('_FILE') && value) {
-      const base = key.slice(0, -'_FILE'.length);
-      if (out[base] === undefined) out[base] = readFileSync(value, 'utf8').trim();
-    }
+  // Only Streamline's own settings honour the *_FILE convention.
+  for (const base of Object.keys(schema.shape)) {
+    const file = env[`${base}_FILE`];
+    if (file && out[base] === undefined) out[base] = readFileSync(file, 'utf8').trim();
   }
   return out;
 }
