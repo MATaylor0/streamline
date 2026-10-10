@@ -46,7 +46,8 @@ export async function createApp(config: Config, opts: { log?: Logger; migrate?: 
   }
 
   const services: Services = { db: database.db, dialect: database.dialect, config };
-  services.onEvent = createWebhookDispatcher(services, log);
+  const dispatcher = createWebhookDispatcher(services, log);
+  services.onEvent = dispatcher;
   const executor = new Executor(services, allOperations);
 
   if (opts.bootstrap ?? true) await bootstrap(executor, config, log);
@@ -57,7 +58,10 @@ export async function createApp(config: Config, opts: { log?: Logger; migrate?: 
     database,
     services,
     executor,
-    close: () => database.close(),
+    close: async () => {
+      await dispatcher.flush();
+      await database.close();
+    },
   };
 }
 

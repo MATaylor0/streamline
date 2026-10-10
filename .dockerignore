@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/public
+
+**/*.db*
+.git
+.github
+deploy
+docs
+*.md
+.env
+.env.*

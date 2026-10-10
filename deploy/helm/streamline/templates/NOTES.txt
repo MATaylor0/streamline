@@ -1,0 +1,9 @@
+Streamline is deploying.
+
+  UI:            {{ .Values.publicUrl }}
+  API reference: {{ .Values.publicUrl }}/api/docs
+  OpenAPI:       {{ .Values.publicUrl }}/api/v1/openapi.json
+  MCP endpoint:  {{ .Values.publicUrl }}/mcp   (Authorization: Bearer <token>)
+
+Create a service account + token for an AI agent:
+  kubectl exec deploy/{{ include "streamline.fullname" . }} -- node /app/dist/cli.js create-service-account --name "AI agent" --email agent@svc.local --role editor

@@ -1,0 +1,78 @@
+# Default values for Streamline.
+replicaCount: 2
+
+image:
+  repository: ghcr.io/your-org/streamline
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Public URL users reach (required for SSO; https enables secure cookies + HSTS).
+publicUrl: https://streamline.example.com
+
+# Non-secret configuration (see .env.example for every option).
+env:
+  LOG_LEVEL: info
+  TRUST_PROXY: "true"
+  MIGRATE_ON_START: "true"
+  DATABASE_SSL: require
+  MCP_ENABLED: "true"
+  API_DOCS_ENABLED: "true"
+  AUDIT_READS: "false"
+  # OIDC_ISSUER: https://login.microsoftonline.com/<tenant>/v2.0
+  # OIDC_CLIENT_ID: "..."
+  # OIDC_DISPLAY_NAME: Microsoft
+  # OIDC_ROLE_MAPPING: "admin=<group-id>;editor=<group-id>"
+
+# Secrets. Either let the chart create a Secret from these values, or point
+# existingSecret at one you manage (External Secrets, Sealed Secrets, Vault…).
+# Expected keys: DATABASE_URL, SESSION_SECRET, and optionally
+# BOOTSTRAP_ADMIN_EMAIL, BOOTSTRAP_ADMIN_PASSWORD, OIDC_CLIENT_SECRET.
+existingSecret: ""
+secrets:
+  DATABASE_URL: ""
+  SESSION_SECRET: ""
+  BOOTSTRAP_ADMIN_EMAIL: ""
+  BOOTSTRAP_ADMIN_PASSWORD: ""
+  OIDC_CLIENT_SECRET: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt
+  host: streamline.example.com
+  tls:
+    enabled: true
+    secretName: streamline-tls
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { memory: 768Mi }
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}   # e.g. eks.amazonaws.com/role-arn or azure.workload.identity/client-id
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+networkPolicy:
+  enabled: false

@@ -97,10 +97,14 @@ async function record(services: Services, hook: WebhookRow, result: { ok: boolea
     .execute();
 }
 
-/** Fire-and-forget delivery with three attempts and exponential backoff. */
+/**
+ * Fire-and-forget delivery with three attempts and exponential backoff.
+ * `flush()` waits for in-flight deliveries (used on shutdown and by the CLI).
+ */
 export function createWebhookDispatcher(services: Services, log: Logger) {
-  return (event: DomainEvent) => {
-    void (async () => {
+  const pending = new Set<Promise<void>>();
+  const dispatch = (event: DomainEvent) => {
+    const job = (async () => {
       const hooks = await services.db.selectFrom('webhooks').selectAll().where('active', '=', 1).execute();
       for (const hook of hooks) {
         if (!matchesEvent(parseJson<string[]>(hook.events, []), event.event)) continue;
@@ -112,8 +116,15 @@ export function createWebhookDispatcher(services: Services, log: Logger) {
         if (!result.ok) log.warn({ webhook: hook.id, event: event.event, status: result.status }, 'webhook delivery failed');
         await record(services, hook, result);
       }
-    })().catch((err) => log.error({ err }, 'webhook dispatch error'));
+    })()
+      .catch((err) => log.error({ err }, 'webhook dispatch error'))
+      .finally(() => pending.delete(job));
+    pending.add(job);
   };
+  dispatch.flush = async (timeoutMs = 30_000) => {
+    await Promise.race([Promise.allSettled([...pending]), new Promise((r) => setTimeout(r, timeoutMs).unref())]);
+  };
+  return dispatch;
 }
 
 export async function deliverTest(services: Services, hook: WebhookRow) {

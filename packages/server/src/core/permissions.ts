@@ -14,7 +14,6 @@ export const PERMISSIONS = {
   'comment:write': 'Add and resolve comments',
   'analytics:read': 'View dashboards, reports and team interaction maps',
   'data:export': 'Export data in bulk',
-  'data:import': 'Import data in bulk',
   'self:manage': 'Manage own profile, password and API tokens',
   'admin:users': 'Manage users, service accounts and roles',
   'admin:settings': 'Manage organisation-wide settings and webhooks',

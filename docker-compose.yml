@@ -1,0 +1,41 @@
+# Production-like stack: Streamline + PostgreSQL.
+#   cp .env.example .env   # set SESSION_SECRET, BOOTSTRAP_ADMIN_PASSWORD, POSTGRES_PASSWORD
+#   docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: streamline
+      POSTGRES_USER: streamline
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streamline -d streamline"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  streamline:
+    build: .
+    image: streamline:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://streamline:${POSTGRES_PASSWORD}@postgres:5432/streamline
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+    ports:
+      - "8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+volumes:
+  pgdata:

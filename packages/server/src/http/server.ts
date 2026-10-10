@@ -37,7 +37,8 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 export async function buildServer(app: App): Promise<FastifyInstance> {
   const { config, executor } = app;
   const db = app.database.db;
-  const secureCookies = config.isProduction || (config.PUBLIC_URL?.startsWith('https://') ?? false);
+  // Secure cookies / HSTS follow the public URL's scheme; without one, production assumes TLS termination upstream.
+  const secureCookies = config.PUBLIC_URL ? config.PUBLIC_URL.startsWith('https://') : config.isProduction;
   const oidc = config.oidcEnabled ? new OidcProvider(config) : null;
 
   const server = Fastify({
