@@ -43,9 +43,36 @@ export interface Process {
   publishedVersion: number | null;
   submittedBy: string | null;
   stepCount: number;
+  agent: { id: string; name: string; status: string } | null;
+  automationLevel: AutomationLevel;
+  oversight: string | null;
   createdAt: string;
   updatedAt: string;
   updatedBy: { id: string; name: string } | null;
+}
+
+export type AutomationLevel = 'manual' | 'assisted' | 'supervised' | 'autonomous';
+
+export interface Agent {
+  id: string;
+  name: string;
+  description: string;
+  provider: string | null;
+  model: string | null;
+  platform: string | null;
+  ownerTeam: Ref | null;
+  status: 'proposed' | 'pilot' | 'production' | 'suspended' | 'retired';
+  riskTier: 'minimal' | 'limited' | 'high';
+  dataAccess: string | null;
+  serviceAccount: { id: string; name: string; email: string; status: string } | null;
+  documentationUrl: string | null;
+  nextReviewAt: string | null;
+  systems: Array<{ id: string; name: string }>;
+  systemIds: string[];
+  stepCount: number;
+  processCount: number;
+  wholeProcessCount: number;
+  delegations: { assisted: number; supervised: number; autonomous: number };
 }
 
 export type NodeType = 'start' | 'end' | 'task' | 'decision' | 'subprocess' | 'event' | 'document' | 'system' | 'note';
@@ -66,6 +93,9 @@ export interface StepNode {
   systemIds: string[];
   riskIds: string[];
   controlIds: string[];
+  agentId: string | null;
+  automationLevel: AutomationLevel;
+  oversight: string | null;
 }
 
 export interface Flow {
@@ -182,4 +212,5 @@ export interface Settings {
   defaultReviewIntervalDays: number;
   processRefPrefix: string;
   loginBanner: string;
+  requireAiOversight: boolean;
 }

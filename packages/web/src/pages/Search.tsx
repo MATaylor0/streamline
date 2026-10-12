@@ -5,7 +5,7 @@ import { Empty, ErrorBox, Loading, PageHeader } from '../components/ui';
 import { useDebounced, useOp } from '../hooks';
 
 interface Hit {
-  type: 'process' | 'step' | 'team' | 'system' | 'risk' | 'control';
+  type: 'process' | 'step' | 'team' | 'system' | 'risk' | 'control' | 'agent';
   id: string;
   title: string;
   subtitle: string | null;
@@ -21,10 +21,11 @@ const TYPES: Array<[Hit['type'], string, string]> = [
   ['system', 'Systems', 'purple'],
   ['risk', 'Risks', 'red'],
   ['control', 'Controls', 'amber'],
+  ['agent', 'AI agents', 'purple'],
 ];
 
 const href = (h: Hit) =>
-  h.type === 'process' || h.type === 'step' ? `/processes/${h.processId}` : h.type === 'team' ? `/teams/${h.id}` : h.type === 'system' ? `/systems/${h.id}` : h.type === 'risk' ? `/risks/${h.id}` : `/controls/${h.id}`;
+  h.type === 'process' || h.type === 'step' ? `/processes/${h.processId}` : h.type === 'team' ? `/teams/${h.id}` : h.type === 'system' ? `/systems/${h.id}` : h.type === 'risk' ? `/risks/${h.id}` : h.type === 'agent' ? `/agents/${h.id}` : `/controls/${h.id}`;
 
 function Highlight({ text, terms }: { text: string; terms: string[] }) {
   if (!terms.length) return <>{text}</>;
@@ -97,7 +98,7 @@ export function SearchPage() {
               return (
                 <li key={`${h.type}:${h.id}`} style={{ padding: '12px 0' }}>
                   <div className="row">
-                    <span className={`badge ${cls}`}>{label.replace(/s$/, '')}</span>
+                    <span className={`badge ${cls}`}>{label === 'AI agents' ? 'AI agent' : label.replace(/s$/, '')}</span>
                     <Link to={href(h)} style={{ fontWeight: 600 }}>
                       <Highlight text={h.title} terms={terms} />
                     </Link>

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Content } from '../components/Layout';
-import { DiagramEditor } from '../components/DiagramEditor';
+import { AiDelegationFields, DiagramEditor } from '../components/DiagramEditor';
+import { AiBadge } from '../components/ai';
 import { Confirm, Empty, ErrorBox, Field, Loading, Modal, StatusBadge, TagInput, Tabs, TeamChip, fmtDate, timeAgo, EffectivenessBadge, RatingBadge } from '../components/ui';
 import { IconDownload } from '../components/icons';
 import { useAction, useOp } from '../hooks';
@@ -119,6 +120,7 @@ function ProcessHeader({ process }: { process: ProcessFull }) {
             <h1>{process.name}</h1>
             <StatusBadge status={process.status} />
             {process.publishedVersion && <span className="badge">v{process.publishedVersion}</span>}
+            <AiBadge level={process.automationLevel} agent={process.agent?.name} />
           </div>
           {process.summary && <div className="muted" style={{ marginTop: 4, maxWidth: 900 }}>{process.summary}</div>}
           <div className="row wrap small" style={{ marginTop: 8, gap: 14 }}>
@@ -254,6 +256,9 @@ function DetailsTab({ process }: { process: ProcessFull }) {
       ownerUserId: process.ownerUser?.id ?? '',
       tags: process.tags.map((t) => t.name),
       reviewIntervalDays: process.reviewIntervalDays ?? 0,
+      agentId: process.agent?.id ?? null,
+      automationLevel: process.automationLevel,
+      oversight: process.oversight ?? '',
     }),
     [process],
   );
@@ -303,6 +308,12 @@ function DetailsTab({ process }: { process: ProcessFull }) {
               <input disabled={!editable} type="number" min={0} value={form.reviewIntervalDays} onChange={(e) => setForm({ ...form, reviewIntervalDays: Number(e.target.value) })} />
             </Field>
           </div>
+          <AiDelegationFields
+            scope="process"
+            editable={editable}
+            value={{ agentId: form.agentId, automationLevel: form.automationLevel, oversight: form.oversight }}
+            onChange={(p) => setForm({ ...form, ...p, oversight: p.oversight ?? form.oversight })}
+          />
           <Field label="Tags">
             {editable ? <TagInput value={form.tags} onChange={(tags) => setForm({ ...form, tags })} suggestions={catalog.tags.map((t) => t.name)} /> : <div>{form.tags.join(', ') || '—'}</div>}
           </Field>
@@ -320,6 +331,8 @@ function DetailsTab({ process }: { process: ProcessFull }) {
                     ownerTeamId: form.ownerTeamId || null,
                     ownerUserId: form.ownerUserId || null,
                     reviewIntervalDays: form.reviewIntervalDays || null,
+                    agentId: form.automationLevel === 'manual' ? null : form.agentId,
+                    oversight: form.automationLevel === 'manual' ? null : form.oversight || null,
                   })
                 }
               >
@@ -414,6 +427,7 @@ function StepsTab({ process }: { process: ProcessFull }) {
                 <th>Step</th>
                 <th>Team / role</th>
                 <th>Systems</th>
+                <th>AI delegation</th>
                 <th>Next</th>
                 <th>Effort</th>
               </tr>
@@ -431,6 +445,16 @@ function StepsTab({ process }: { process: ProcessFull }) {
                     {s.actorRole && <div className="muted small">{s.actorRole}</div>}
                   </td>
                   <td className="small">{s.systemIds.map((id) => sysName.get(id)).join(', ') || '—'}</td>
+                  <td className="small">
+                    {s.automationLevel === 'manual' ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      <>
+                        <AiBadge level={s.automationLevel} agent={s.agentId ? catalog.agentMap.get(s.agentId)?.name : 'no agent'} />
+                        {s.oversight && <div className="muted">Oversight: {s.oversight}</div>}
+                      </>
+                    )}
+                  </td>
                   <td className="small">
                     {process.edges
                       .filter((e) => e.source === s.id)

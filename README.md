@@ -23,6 +23,13 @@ Every action is an **operation** (`process.create`, `node.update`, `analytics.te
 - Diagram quality checks: missing start or end, dead ends, unlabelled decisions, steps with no team, unlinked sub-processes
 - Step-by-step procedure view and a risk & control coverage view for each process
 
+**AI agents in your processes**
+- An **AI agent register**: each agent's provider, model, platform, accountable team, lifecycle status (proposed → pilot → production → suspended → retired), risk tier, data access, the systems it can use, and the Streamline service account it acts through
+- Delegate individual steps, or whole processes, to an agent at a stated level of autonomy: **assisted** (AI drafts, a person decides), **supervised** (AI performs, a person approves each output) or **autonomous** (AI performs, people monitor exceptions). Each delegation records how humans oversee it
+- Optional policy: processes can't be submitted or published while AI-performed work lacks a named agent or documented oversight. Retired agents can't be given new work
+- AI delegation register: the share of work delegated, by level and by agent, with gaps flagged. Gaps include autonomous steps carrying uncontrolled high risks, agents in use outside pilot or production, agents without an owner, and overdue reviews
+- The team interaction map can show agents as participants, so human → AI → human handoffs become visible. Exports (BPMN, Markdown, JSON) carry the delegation details
+
 **Governance**
 - Lifecycle: draft → in review → published → archived. Each publish creates an immutable numbered version
 - Segregation of duties: the person who submits a process can't approve it (configurable)

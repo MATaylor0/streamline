@@ -80,6 +80,9 @@ export interface ProcessesTable {
   published_version: number | null;
   submitted_by: string | null;
   submitted_at: string | null;
+  agent_id: Generated<string | null>;
+  automation_level: Generated<string>; // manual | assisted | supervised | autonomous
+  oversight: Generated<string | null>;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;
@@ -110,6 +113,9 @@ export interface NodesTable {
   inputs: string | null;
   outputs: string | null;
   linked_process_id: string | null;
+  agent_id: Generated<string | null>;
+  automation_level: Generated<string>; // manual | assisted | supervised | autonomous
+  oversight: Generated<string | null>;
   x: number;
   y: number;
   created_at: string;
@@ -164,6 +170,29 @@ export interface ControlsTable {
   owner_team_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AgentsTable {
+  id: string;
+  name: string;
+  description: string;
+  provider: string | null;
+  model: string | null;
+  platform: string | null;
+  owner_team_id: string | null;
+  status: string; // proposed | pilot | production | suspended | retired
+  risk_tier: string; // minimal | limited | high
+  data_access: string | null;
+  service_account_id: string | null;
+  documentation_url: string | null;
+  next_review_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentSystemsTable {
+  agent_id: string;
+  system_id: string;
 }
 
 export interface NodeLinksTable {
@@ -251,6 +280,8 @@ export interface Database {
   systems: SystemsTable;
   risks: RisksTable;
   controls: ControlsTable;
+  agents: AgentsTable;
+  agent_systems: AgentSystemsTable;
   node_systems: NodeLinksTable;
   node_risks: NodeLinksTable;
   node_controls: NodeLinksTable;
@@ -273,5 +304,6 @@ export type TeamRow = Selectable<TeamsTable>;
 export type SystemRow = Selectable<SystemsTable>;
 export type RiskRow = Selectable<RisksTable>;
 export type ControlRow = Selectable<ControlsTable>;
+export type AgentRow = Selectable<AgentsTable>;
 export type NewNode = Insertable<NodesTable>;
 export type ProcessUpdate = Updateable<ProcessesTable>;

@@ -62,6 +62,13 @@ export function SettingsPage() {
                 <div className="muted small">Editors may only change processes owned by a team they belong to (admins excepted). Applies to UI, API and MCP alike.</div>
               </span>
             </label>
+            <label className="check">
+              <input type="checkbox" checked={form.requireAiOversight} onChange={(e) => setForm({ ...form, requireAiOversight: e.target.checked })} />
+              <span>
+                Require complete AI delegation before review
+                <div className="muted small">Steps or processes delegated to AI must name a registered agent, and AI-performed work (supervised / autonomous) must describe its human oversight, before submission and publishing.</div>
+              </span>
+            </label>
             <Field label="Default review interval (days)" hint="How often published processes must be re-certified. 0 disables.">
               <input type="number" min={0} max={3650} value={form.defaultReviewIntervalDays} onChange={(e) => setForm({ ...form, defaultReviewIntervalDays: Number(e.target.value) })} />
             </Field>

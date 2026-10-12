@@ -5,7 +5,7 @@ import { can } from '../core/executor.js';
 import { newId, nowIso, pickColor } from '../lib/util.js';
 import { loadDiagram, nextRef, processDto, type ProcessDto } from './shared.js';
 import type { DiagramEdgeInput, DiagramNodeInput } from './diagram.js';
-import { NODE_TYPES } from './shared.js';
+import { AUTOMATION_LEVELS, NODE_TYPES } from './shared.js';
 
 export const SNAPSHOT_FORMAT = 'streamline.process.v1';
 
@@ -26,6 +26,9 @@ export const SnapshotSchema = z.object({
     ownerTeam: z.object({ id: z.string().optional(), name: z.string() }).nullish(),
     tags: z.array(z.string()).default([]),
     reviewIntervalDays: z.number().int().nullish(),
+    agent: z.object({ id: z.string().optional(), name: z.string() }).nullish(),
+    automationLevel: z.enum(AUTOMATION_LEVELS).default('manual'),
+    oversight: z.string().nullish(),
   }),
   nodes: z
     .array(
@@ -44,6 +47,9 @@ export const SnapshotSchema = z.object({
         systems: z.array(z.object({ id: z.string().optional(), name: z.string() })).default([]),
         risks: z.array(z.object({ id: z.string().optional(), ref: z.string().optional(), title: z.string() })).default([]),
         controls: z.array(z.object({ id: z.string().optional(), ref: z.string().optional(), name: z.string() })).default([]),
+        agent: z.object({ id: z.string().optional(), name: z.string() }).nullish(),
+        automationLevel: z.enum(AUTOMATION_LEVELS).default('manual'),
+        oversight: z.string().nullish(),
       }),
     )
     .max(1000),
@@ -59,12 +65,14 @@ export async function buildSnapshot(db: DB, dto: ProcessDto): Promise<Snapshot> 
   const ids = (k: 'systemIds' | 'riskIds' | 'controlIds') => [...new Set(diagram.nodes.flatMap((n) => n[k]))].concat(['-']);
   const teamIds = [...new Set(diagram.nodes.map((n) => n.teamId).filter(Boolean) as string[])].concat(['-']);
   const linkedIds = [...new Set(diagram.nodes.map((n) => n.linkedProcessId).filter(Boolean) as string[])].concat(['-']);
-  const [teams, systems, risks, controls, linked] = await Promise.all([
+  const agentIds = [...new Set([dto.agent?.id, ...diagram.nodes.map((n) => n.agentId)].filter(Boolean) as string[])].concat(['-']);
+  const [teams, systems, risks, controls, linked, agents] = await Promise.all([
     db.selectFrom('teams').select(['id', 'name']).where('id', 'in', teamIds).execute(),
     db.selectFrom('systems').select(['id', 'name']).where('id', 'in', ids('systemIds')).execute(),
     db.selectFrom('risks').select(['id', 'ref', 'title']).where('id', 'in', ids('riskIds')).execute(),
     db.selectFrom('controls').select(['id', 'ref', 'name']).where('id', 'in', ids('controlIds')).execute(),
     db.selectFrom('processes').select(['id', 'ref', 'name']).where('id', 'in', linkedIds).execute(),
+    db.selectFrom('agents').select(['id', 'name']).where('id', 'in', agentIds).execute(),
   ]);
   const by = <T extends { id: string }>(rows: T[]) => new Map(rows.map((r) => [r.id, r]));
   const tm = by(teams);
@@ -72,6 +80,7 @@ export async function buildSnapshot(db: DB, dto: ProcessDto): Promise<Snapshot> 
   const rm = by(risks);
   const cm = by(controls);
   const lm = by(linked);
+  const am = by(agents);
   return {
     format: SNAPSHOT_FORMAT,
     exportedAt: nowIso(),
@@ -84,6 +93,9 @@ export async function buildSnapshot(db: DB, dto: ProcessDto): Promise<Snapshot> 
       ownerTeam: dto.ownerTeam ? { id: dto.ownerTeam.id, name: dto.ownerTeam.name } : null,
       tags: dto.tags.map((t) => t.name),
       reviewIntervalDays: dto.reviewIntervalDays,
+      agent: dto.agent ? { id: dto.agent.id, name: dto.agent.name } : null,
+      automationLevel: dto.automationLevel,
+      oversight: dto.oversight,
     },
     nodes: diagram.nodes.map((n) => ({
       id: n.id,
@@ -100,6 +112,9 @@ export async function buildSnapshot(db: DB, dto: ProcessDto): Promise<Snapshot> 
       systems: n.systemIds.map((id) => sm.get(id)).filter((v): v is { id: string; name: string } => Boolean(v)),
       risks: n.riskIds.map((id) => rm.get(id)).filter((v): v is { id: string; ref: string; title: string } => Boolean(v)),
       controls: n.controlIds.map((id) => cm.get(id)).filter((v): v is { id: string; ref: string; name: string } => Boolean(v)),
+      agent: n.agentId && am.get(n.agentId) ? am.get(n.agentId)! : null,
+      automationLevel: n.automationLevel,
+      oversight: n.oversight,
     })),
     edges: diagram.edges.map((e) => ({ source: e.source, target: e.target, label: e.label })),
   };
@@ -119,7 +134,13 @@ export async function resolveSnapshot(
   ctx: OpContext,
   snap: Snapshot,
   opts: { preserveNodeIds: boolean },
-): Promise<{ nodes: DiagramNodeInput[]; edges: DiagramEdgeInput[]; ownerTeamId: string | null; tagIds: string[] }> {
+): Promise<{
+  nodes: DiagramNodeInput[];
+  edges: DiagramEdgeInput[];
+  ownerTeamId: string | null;
+  tagIds: string[];
+  agentId: string | null;
+}> {
   const db = ctx.db;
   const mayCreate = can(ctx.actor, 'catalog:write');
   const now = nowIso();
@@ -184,6 +205,26 @@ export async function resolveSnapshot(
     return id;
   };
 
+  const agentCache = new Map<string, string | null>();
+  const resolveAgent = async (a: { id?: string; name: string } | null | undefined): Promise<string | null> => {
+    if (!a) return null;
+    const key = `${a.id ?? ''}|${a.name}`;
+    if (agentCache.has(key)) return agentCache.get(key)!;
+    let row = a.id ? await db.selectFrom('agents').select(['id', 'status']).where('id', '=', a.id).executeTakeFirst() : undefined;
+    row ??= await db.selectFrom('agents').select(['id', 'status']).where('name', '=', a.name).executeTakeFirst();
+    let id = row && row.status !== 'retired' ? row.id : null;
+    if (!row && mayCreate) {
+      // Imported delegations register the agent as "proposed" so it goes through review here.
+      id = newId();
+      await db
+        .insertInto('agents')
+        .values({ id, name: a.name, description: '', provider: null, model: null, platform: null, owner_team_id: null, status: 'proposed', risk_tier: 'limited', data_access: null, service_account_id: null, documentation_url: null, next_review_at: null, created_at: now, updated_at: now })
+        .execute();
+    }
+    agentCache.set(key, id);
+    return id;
+  };
+
   const resolveLinked = async (p: { id?: string; ref?: string; name: string } | null | undefined): Promise<string | null> => {
     if (!p) return null;
     let row = p.id ? await db.selectFrom('processes').select('id').where('id', '=', p.id).executeTakeFirst() : undefined;
@@ -210,6 +251,9 @@ export async function resolveSnapshot(
       systemIds: compact(await Promise.all(n.systems.map(resolveSystem))),
       riskIds: compact(await Promise.all(n.risks.map(resolveRisk))),
       controlIds: compact(await Promise.all(n.controls.map(resolveControl))),
+      agentId: await resolveAgent(n.agent),
+      automationLevel: n.automationLevel,
+      oversight: n.oversight ?? null,
     });
   }
   const edges: DiagramEdgeInput[] = snap.edges.map((e) => ({
@@ -221,7 +265,7 @@ export async function resolveSnapshot(
   const tagIds: string[] = [];
   for (const name of snap.process.tags) tagIds.push(await ensureTag(db, name));
 
-  return { nodes, edges, ownerTeamId: await resolveTeam(snap.process.ownerTeam), tagIds };
+  return { nodes, edges, ownerTeamId: await resolveTeam(snap.process.ownerTeam), tagIds, agentId: await resolveAgent(snap.process.agent) };
 }
 
 export async function ensureTag(db: DB, name: string): Promise<string> {

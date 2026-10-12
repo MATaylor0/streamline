@@ -8,7 +8,7 @@ import { checkPasswordPolicy, hashPassword, verifyPassword } from '../auth/passw
 import { destroyUserSessions, generateApiToken } from '../auth/identity.js';
 import { likeEscape, newId, nowIso, parseJson, randomToken } from '../lib/util.js';
 import { sql } from 'kysely';
-import { Id, Pagination, SettingsSchema, getSettings } from './shared.js';
+import { Id, Pagination, SettingsSchema, getSettings, partialShape } from './shared.js';
 import { assertSafeWebhookUrl, WEBHOOK_EVENTS_HELP, deliverTest } from '../webhooks.js';
 
 const GA = 'Administration';
@@ -449,7 +449,7 @@ export const updateSettings = defineOp({
   kind: 'write',
   http: { method: 'PATCH', path: '/settings' },
   targetType: 'settings',
-  input: SettingsSchema.partial().strict(),
+  input: z.object(partialShape(SettingsSchema.shape)).strict(),
   handler: async (ctx, input) => {
     const now = nowIso();
     for (const [key, value] of Object.entries(input)) {

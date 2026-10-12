@@ -6,6 +6,7 @@ import { catalogOps } from './catalog.js';
 import { insightOps } from './insights.js';
 import { adminOps } from './admin.js';
 import { exportOps } from './exports.js';
+import { agentOps } from './agents.js';
 
 export const metaOperations = defineOp({
   name: 'meta.operations',
@@ -35,6 +36,7 @@ export const metaOperations = defineOp({
 export const allOperations: AnyOperation[] = [
   ...processOps,
   ...catalogOps,
+  ...agentOps,
   ...insightOps,
   ...exportOps,
   ...adminOps,

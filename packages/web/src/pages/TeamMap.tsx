@@ -21,6 +21,19 @@ interface TeamStat {
   systemCount: number;
   outgoingHandoffs: number;
   incomingHandoffs: number;
+  /** Set for AI agent participants (id is "agent:<agentId>"). */
+  agentId?: string;
+}
+interface AgentStat {
+  id: string;
+  agentId: string;
+  name: string;
+  status: string;
+  riskTier: string;
+  stepCount: number;
+  processCount: number;
+  outgoingHandoffs: number;
+  incomingHandoffs: number;
 }
 interface Link_ {
   source: string;
@@ -30,6 +43,7 @@ interface Link_ {
 }
 interface Graph {
   teams: TeamStat[];
+  agents: AgentStat[];
   links: Link_[];
   processCount: number;
   unassignedStepCount: number;
@@ -39,7 +53,7 @@ type TeamNodeData = { team: TeamStat; dim: boolean; scale: number };
 
 const TeamNode = memo(({ data, selected }: NodeProps<Node<TeamNodeData>>) => (
   <div
-    className="team-node"
+    className={`team-node ${data.team.agentId ? 'agent-node' : ''}`}
     style={{
       borderColor: data.team.color,
       opacity: data.dim ? 0.3 : 1,
@@ -48,7 +62,10 @@ const TeamNode = memo(({ data, selected }: NodeProps<Node<TeamNodeData>>) => (
     }}
   >
     <CenterHandles />
-    <div className="tn-name">{data.team.name}</div>
+    <div className="tn-name">
+      {data.team.agentId ? '🤖 ' : ''}
+      {data.team.name}
+    </div>
     <div className="tn-meta">
       {data.team.stepCount} steps · {data.team.processCount} processes
     </div>
@@ -94,11 +111,19 @@ function TeamMap() {
   const [tag, setTag] = useState('');
   const [layoutKind, setLayoutKind] = useState<LayoutKind>('circle');
   const [hideIdle, setHideIdle] = useState(true);
+  const [showAgents, setShowAgents] = useState(false);
   const [selected, setSelected] = useState<{ kind: 'team' | 'link'; id: string } | null>(null);
   const rf = useReactFlow();
-  const { data, isLoading, error } = useOp<Graph>('analytics.teamInteractions', { statuses: scope === 'published' ? 'published' : undefined, tag: tag || undefined });
+  const { data, isLoading, error } = useOp<Graph>('analytics.teamInteractions', { statuses: scope === 'published' ? 'published' : undefined, tag: tag || undefined, includeAgents: showAgents || undefined });
 
-  const teams = useMemo(() => (data?.teams ?? []).filter((t) => !hideIdle || t.stepCount > 0 || t.ownedProcessCount > 0), [data, hideIdle]);
+  const teams = useMemo<TeamStat[]>(
+    () => [
+      ...(data?.teams ?? []).filter((t) => !hideIdle || t.stepCount > 0 || t.ownedProcessCount > 0),
+      // AI agents that perform steps appear as participants alongside teams.
+      ...(data?.agents ?? []).map((a) => ({ ...a, department: 'AI agent', color: '#7c3aed', ownedProcessCount: 0, systemCount: 0 })),
+    ],
+    [data, hideIdle],
+  );
   const links = useMemo(() => (data?.links ?? []).filter((l) => teams.some((t) => t.id === l.source) && teams.some((t) => t.id === l.target)), [data, teams]);
   const maxCount = Math.max(1, ...links.map((l) => l.count));
   const maxSteps = Math.max(1, ...teams.map((t) => t.stepCount));
@@ -127,7 +152,7 @@ function TeamMap() {
     setNodes((ns) => ns.map((n) => ({ ...n, data: { ...n.data, dim: !related(n.id) } })));
     setEdges(
       links.map((l) => {
-        const team = catalog.teamMap.get(l.source);
+        const team = catalog.teamMap.get(l.source) ?? (l.source.startsWith('agent:') ? { color: '#7c3aed' } : undefined);
         const dim = Boolean(focusTeam && l.source !== focusTeam && l.target !== focusTeam);
         return {
           id: `${l.source}>${l.target}`,
@@ -145,7 +170,7 @@ function TeamMap() {
 
   if (isLoading) return <Loading />;
   if (error) return <ErrorBox error={error} />;
-  const teamById = new Map((data?.teams ?? []).map((t) => [t.id, t]));
+  const teamById = new Map(teams.map((t) => [t.id, t]));
   const selTeam = focusTeam ? teamById.get(focusTeam) : undefined;
 
   return (
@@ -177,6 +202,9 @@ function TeamMap() {
         </select>
         <label className="check small">
           <input type="checkbox" checked={hideIdle} onChange={(e) => setHideIdle(e.target.checked)} /> Hide uninvolved teams
+        </label>
+        <label className="check small" title="Steps performed by AI (supervised or autonomous) are shown as handoffs to and from the agent">
+          <input type="checkbox" checked={showAgents} onChange={(e) => setShowAgents(e.target.checked)} /> Show AI agents
         </label>
         <button
           className="btn sm"
@@ -217,8 +245,8 @@ function TeamMap() {
               <div className="row">
                 <TeamChip team={selTeam} />
                 <span className="spacer" />
-                <Link to={`/teams/${selTeam.id}`} className="small">
-                  Team page →
+                <Link to={selTeam.agentId ? `/agents/${selTeam.agentId}` : `/teams/${selTeam.id}`} className="small">
+                  {selTeam.agentId ? 'Agent page →' : 'Team page →'}
                 </Link>
               </div>
               <dl className="kv small">
@@ -226,10 +254,14 @@ function TeamMap() {
                 <dd>{selTeam.stepCount}</dd>
                 <dt>Processes involved</dt>
                 <dd>{selTeam.processCount}</dd>
-                <dt>Processes owned</dt>
-                <dd>{selTeam.ownedProcessCount}</dd>
-                <dt>Systems used</dt>
-                <dd>{selTeam.systemCount}</dd>
+                {!selTeam.agentId && (
+                  <>
+                    <dt>Processes owned</dt>
+                    <dd>{selTeam.ownedProcessCount}</dd>
+                    <dt>Systems used</dt>
+                    <dd>{selTeam.systemCount}</dd>
+                  </>
+                )}
                 <dt>Hands work to</dt>
                 <dd>{selTeam.outgoingHandoffs} times</dd>
                 <dt>Receives work</dt>

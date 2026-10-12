@@ -15,6 +15,7 @@ import {
   loadProcess,
   nextRef,
   nodeDtos,
+  partialShape,
   processDto,
   processDtos,
   replaceLinks,
@@ -23,6 +24,8 @@ import {
   type ProcessDto,
 } from './shared.js';
 import { DiagramInput, NodeFields, Position, autoLayout, diagramWithMeta, writeDiagram } from './diagram.js';
+import { assertAssignableAgents, delegationIssues } from './agent-rules.js';
+import type { ProcessRow } from '../db/schema.js';
 import { SnapshotSchema, buildSnapshot, ensureTag, resolveSnapshot, setProcessTags, type Snapshot } from './snapshot.js';
 
 const G = 'Processes';
@@ -38,6 +41,9 @@ const ProcessFields = {
   ownerUserId: z.string().nullish().describe('Individual process owner'),
   tags: z.array(z.string().min(1).max(60)).max(50).optional().describe('Tag names; unknown tags are created'),
   reviewIntervalDays: z.number().int().min(0).max(3650).nullish().describe('How often the process must be re-certified'),
+  agentId: z.string().nullish().describe('AI agent the whole process is delegated to (e.g. an agent that runs it end to end)'),
+  automationLevel: NodeFields.automationLevel.describe('Delegation level for the process as a whole (see node automationLevel)'),
+  oversight: NodeFields.oversight,
 };
 
 async function fullProcess(ctx: OpContext, id: string) {
@@ -170,6 +176,7 @@ export const createProcess = defineOp({
     const settings = await getSettings(ctx.db);
     await assertExists(ctx.db, 'teams', [input.ownerTeamId], 'owner team');
     await assertExists(ctx.db, 'users', [input.ownerUserId], 'owner user');
+    await assertAssignableAgents(ctx.db, [input.agentId]);
     const id = newId();
     const now = nowIso();
     const ref = await nextRef(ctx.db, 'process', settings.processRefPrefix);
@@ -186,6 +193,9 @@ export const createProcess = defineOp({
         owner_team_id: input.ownerTeamId ?? null,
         owner_user_id: input.ownerUserId ?? (ctx.actor.userKind === 'human' ? ctx.actor.id : null),
         review_interval_days: input.reviewIntervalDays ?? settings.defaultReviewIntervalDays,
+        agent_id: input.agentId ?? null,
+        automation_level: input.automationLevel,
+        oversight: input.oversight ?? null,
         next_review_at: null,
         revision: 1,
         published_version: null,
@@ -206,8 +216,8 @@ export const createProcess = defineOp({
         ctx,
         row,
         [
-          { id: 's', type: 'start', label: 'Start', description: '', position: { x: 0, y: 0 }, systemIds: [], riskIds: [], controlIds: [] },
-          { id: 'e', type: 'end', label: 'End', description: '', position: { x: 480, y: 0 }, systemIds: [], riskIds: [], controlIds: [] },
+          { id: 's', type: 'start', label: 'Start', description: '', position: { x: 0, y: 0 }, systemIds: [], riskIds: [], controlIds: [], automationLevel: 'manual' },
+          { id: 'e', type: 'end', label: 'End', description: '', position: { x: 480, y: 0 }, systemIds: [], riskIds: [], controlIds: [], automationLevel: 'manual' },
         ],
         [],
       );
@@ -229,9 +239,7 @@ export const updateProcess = defineOp({
   input: z.object({
     id: Id,
     expectedRevision: z.number().int().optional().describe('Optimistic concurrency check'),
-    ...Object.fromEntries(Object.entries(ProcessFields).map(([k, v]) => [k, v.optional()])) as {
-      [K in keyof typeof ProcessFields]: z.ZodOptional<(typeof ProcessFields)[K]>;
-    },
+    ...partialShape(ProcessFields),
   }),
   handler: async (ctx, input) => {
     const p = await loadProcess(ctx.db, input.id);
@@ -239,6 +247,7 @@ export const updateProcess = defineOp({
     await assertCanEditProcess(ctx, p);
     await assertExists(ctx.db, 'teams', [input.ownerTeamId], 'owner team');
     await assertExists(ctx.db, 'users', [input.ownerUserId], 'owner user');
+    await assertAssignableAgents(ctx.db, [input.agentId]);
     await touchProcess(ctx, p, input.expectedRevision);
     const set: Record<string, unknown> = {};
     if (input.name !== undefined) set.name = input.name;
@@ -248,6 +257,9 @@ export const updateProcess = defineOp({
     if (input.ownerTeamId !== undefined) set.owner_team_id = input.ownerTeamId;
     if (input.ownerUserId !== undefined) set.owner_user_id = input.ownerUserId;
     if (input.reviewIntervalDays !== undefined) set.review_interval_days = input.reviewIntervalDays;
+    if (input.agentId !== undefined) set.agent_id = input.agentId;
+    if (input.automationLevel !== undefined) set.automation_level = input.automationLevel;
+    if (input.oversight !== undefined) set.oversight = input.oversight;
     if (Object.keys(set).length) await ctx.db.updateTable('processes').set(set).where('id', '=', p.id).execute();
     if (input.tags) await applyTags(ctx, p.id, input.tags);
     return fullProcess(ctx, p.id);
@@ -308,6 +320,9 @@ async function importSnapshot(ctx: OpContext, snap: Snapshot) {
       owner_team_id: resolved.ownerTeamId,
       owner_user_id: ctx.actor.userKind === 'human' ? ctx.actor.id : null,
       review_interval_days: snap.process.reviewIntervalDays ?? settings.defaultReviewIntervalDays,
+      agent_id: resolved.agentId,
+      automation_level: snap.process.automationLevel,
+      oversight: snap.process.oversight ?? null,
       next_review_at: null,
       revision: 1,
       published_version: null,
@@ -415,6 +430,9 @@ export const addNode = defineOp({
         inputs: input.inputs ?? null,
         outputs: input.outputs ?? null,
         linked_process_id: input.linkedProcessId ?? null,
+        agent_id: input.agentId ?? null,
+        automation_level: input.automationLevel,
+        oversight: input.oversight ?? null,
         x: position.x,
         y: position.y,
         created_at: now,
@@ -442,13 +460,14 @@ export const addNode = defineOp({
 async function validateNodeRefs(
   ctx: OpContext,
   processId: string,
-  n: { teamId?: string | null; systemIds?: string[]; riskIds?: string[]; controlIds?: string[]; linkedProcessId?: string | null },
+  n: { teamId?: string | null; systemIds?: string[]; riskIds?: string[]; controlIds?: string[]; linkedProcessId?: string | null; agentId?: string | null },
 ) {
   await assertExists(ctx.db, 'teams', [n.teamId], 'team ids');
   await assertExists(ctx.db, 'systems', n.systemIds ?? [], 'system ids');
   await assertExists(ctx.db, 'risks', n.riskIds ?? [], 'risk ids');
   await assertExists(ctx.db, 'controls', n.controlIds ?? [], 'control ids');
   await assertExists(ctx.db, 'processes', [n.linkedProcessId], 'linked process ids');
+  await assertAssignableAgents(ctx.db, [n.agentId]);
   if (n.linkedProcessId === processId) throw new ValidationError('A process cannot link to itself');
 }
 
@@ -478,6 +497,9 @@ export const updateNode = defineOp({
     inputs: NodeFields.inputs,
     outputs: NodeFields.outputs,
     linkedProcessId: NodeFields.linkedProcessId,
+    agentId: NodeFields.agentId,
+    automationLevel: NodeFields.automationLevel.unwrap().optional(),
+    oversight: NodeFields.oversight,
     position: Position.optional(),
     systemIds: z.array(z.string()).max(100).optional(),
     riskIds: z.array(z.string()).max(100).optional(),
@@ -501,6 +523,9 @@ export const updateNode = defineOp({
       inputs: 'inputs',
       outputs: 'outputs',
       linkedProcessId: 'linked_process_id',
+      agentId: 'agent_id',
+      automationLevel: 'automation_level',
+      oversight: 'oversight',
     };
     for (const [k, col] of Object.entries(map)) {
       const v = (input as Record<string, unknown>)[k];
@@ -652,6 +677,7 @@ export const submitForReview = defineOp({
       (await ctx.db.selectFrom('nodes').select((eb) => eb.fn.countAll<number>().as('n')).where('process_id', '=', p.id).executeTakeFirst())?.n ?? 0,
     );
     if (nodeCount === 0) throw new ValidationError('Add at least one step before submitting for review');
+    await assertAiOversight(ctx, p);
     await ctx.db
       .updateTable('processes')
       .set({ status: 'in_review', submitted_by: ctx.actor.id, submitted_at: nowIso(), updated_at: nowIso(), updated_by: ctx.actor.id })
@@ -661,6 +687,18 @@ export const submitForReview = defineOp({
     return processDto(ctx.db, await loadProcess(ctx.db, p.id));
   },
 });
+
+/** When enabled in settings, AI-delegated work must name its agent and describe human oversight. */
+async function assertAiOversight(ctx: OpContext, p: ProcessRow) {
+  const settings = await getSettings(ctx.db);
+  if (!settings.requireAiOversight) return;
+  const nodes = await ctx.db.selectFrom('nodes').select(['label', 'agent_id', 'automation_level', 'oversight']).where('process_id', '=', p.id).execute();
+  const issues = delegationIssues([
+    { label: `Process ${p.ref}`, agentId: p.agent_id, automationLevel: p.automation_level, oversight: p.oversight },
+    ...nodes.map((n) => ({ label: n.label, agentId: n.agent_id, automationLevel: n.automation_level, oversight: n.oversight })),
+  ]);
+  if (issues.length) throw new ValidationError(`AI delegation is incomplete: ${issues.join('; ')}`, { issues });
+}
 
 async function addSystemComment(ctx: OpContext, processId: string, body: string) {
   const now = nowIso();
@@ -698,6 +736,7 @@ export const approveProcess = defineOp({
     ) {
       throw new ForbiddenError('Segregation of duties: you cannot approve a process you submitted');
     }
+    await assertAiOversight(ctx, p);
     const now = nowIso();
     const version = await createVersion(ctx, p.id, input.changeNote);
     await ctx.db
@@ -925,6 +964,9 @@ export const revertToVersion = defineOp({
         description: snap.process.description,
         category: snap.process.category ?? null,
         owner_team_id: resolved.ownerTeamId,
+        agent_id: resolved.agentId,
+        automation_level: snap.process.automationLevel,
+        oversight: snap.process.oversight ?? null,
       })
       .where('id', '=', p.id)
       .execute();

@@ -1196,3 +1196,53 @@ table.table {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------------------------------------------------------- AI delegation */
+.pn-ai {
+  margin-top: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 6px;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pn-ai.assisted {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.pn-ai.supervised {
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+.pn-ai.autonomous {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.pnode:has(.pn-ai.autonomous) {
+  border-style: dashed;
+}
+.ai-dot {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 13px;
+  line-height: 1;
+  background: var(--surface);
+  border-radius: 50%;
+  padding: 2px;
+  box-shadow: var(--shadow);
+}
+.ai-section {
+  border: 1px solid color-mix(in srgb, var(--purple) 30%, var(--border));
+  background: color-mix(in srgb, var(--purple) 5%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.agent-node {
+  border-style: dashed !important;
+  background: color-mix(in srgb, var(--purple) 7%, var(--surface)) !important;
+}

@@ -3,7 +3,8 @@ import type { OpContext } from '../core/operation.js';
 import type { ProcessRow } from '../db/schema.js';
 import { ValidationError } from '../core/errors.js';
 import { newId, nowIso, uniq } from '../lib/util.js';
-import { NODE_TYPES, assertExists, loadDiagram, replaceLinks } from './shared.js';
+import { AUTOMATION_LEVELS, NODE_TYPES, assertExists, loadDiagram, replaceLinks } from './shared.js';
+import { assertAssignableAgents } from './agent-rules.js';
 
 export const Position = z.object({ x: z.number().finite(), y: z.number().finite() });
 
@@ -23,6 +24,14 @@ export const NodeFields = {
   systemIds: z.array(z.string()).max(100).default([]).describe('Business systems used in this step'),
   riskIds: z.array(z.string()).max(100).default([]).describe('Risks that arise in this step'),
   controlIds: z.array(z.string()).max(100).default([]).describe('Controls performed in this step'),
+  agentId: z.string().nullish().describe('AI agent this step is delegated to (see agent_list)'),
+  automationLevel: z
+    .enum(AUTOMATION_LEVELS)
+    .default('manual')
+    .describe(
+      'manual = people only; assisted = AI drafts/recommends, a person performs and decides; supervised = AI performs, a person reviews/approves each output; autonomous = AI performs end to end, people monitor and handle exceptions',
+    ),
+  oversight: z.string().max(2000).nullish().describe('Human oversight for AI-delegated work: who reviews, how exceptions escalate, kill switch'),
 };
 
 export const DiagramNodeInput = z.object({
@@ -77,6 +86,7 @@ export async function writeDiagram(
   await assertExists(db, 'risks', nodes.flatMap((n) => n.riskIds), 'risk ids');
   await assertExists(db, 'controls', nodes.flatMap((n) => n.controlIds), 'control ids');
   await assertExists(db, 'processes', nodes.map((n) => n.linkedProcessId), 'linked process ids');
+  await assertAssignableAgents(db, nodes.map((n) => n.agentId));
   if (nodes.some((n) => n.linkedProcessId === process.id)) throw new ValidationError('A process cannot link to itself');
 
   const resolve = (ref: string): string => {
@@ -118,6 +128,9 @@ export async function writeDiagram(
       inputs: n.inputs ?? null,
       outputs: n.outputs ?? null,
       linked_process_id: n.linkedProcessId ?? null,
+      agent_id: n.agentId ?? null,
+      automation_level: n.automationLevel,
+      oversight: n.oversight ?? null,
       x: pos.x,
       y: pos.y,
       updated_at: now,

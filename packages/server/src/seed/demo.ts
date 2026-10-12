@@ -6,7 +6,7 @@ import type { Actor } from '../core/operation.js';
  * executor (the "system path"), exactly as the UI, API or an AI agent would.
  */
 
-type Step = [key: string, type: string, label: string, team: string | null, extra?: { role?: string; systems?: string[]; risks?: string[]; controls?: string[]; desc?: string; minutes?: number; link?: string }];
+type Step = [key: string, type: string, label: string, team: string | null, extra?: { role?: string; systems?: string[]; risks?: string[]; controls?: string[]; desc?: string; minutes?: number; link?: string; agent?: string; level?: 'assisted' | 'supervised' | 'autonomous'; oversight?: string }];
 type Flow = [from: string, to: string, label?: string];
 
 interface ProcessSpec {
@@ -105,7 +105,7 @@ export async function seedDemoData(executor: Executor, actor: Actor): Promise<vo
         ['s', 'start', 'Supplier needed', 'Operations'],
         ['req', 'task', 'Submit supplier request', 'Operations', { role: 'Requester', systems: ['Coupa'], minutes: 15 }],
         ['due', 'task', 'Collect supplier documentation', 'Procurement', { role: 'Buyer', systems: ['Coupa', 'DocuSign'], minutes: 60 }],
-        ['scr', 'task', 'Sanctions & KYC screening', 'Compliance', { systems: ['Coupa'], risks: ['Engaging a sanctioned supplier'], controls: ['Sanctions screening of new suppliers'], minutes: 30 }],
+        ['scr', 'task', 'Sanctions & KYC screening', 'Compliance', { systems: ['Coupa'], risks: ['Engaging a sanctioned supplier'], controls: ['Sanctions screening of new suppliers'], minutes: 30, agent: 'Sanctions Screening Assistant', level: 'assisted', oversight: 'Compliance analyst reviews every match and makes the final decision' }],
         ['ok', 'decision', 'Screening passed?', null],
         ['rej', 'end', 'Supplier rejected', 'Procurement'],
         ['setup', 'task', 'Create vendor master record', 'Financial Control', { role: 'Master Data Analyst', systems: ['SAP S/4HANA'], risks: ['Fraudulent vendor bank detail change'], controls: ['Vendor master change review'], minutes: 20 }],
@@ -143,11 +143,11 @@ export async function seedDemoData(executor: Executor, actor: Actor): Promise<vo
       publish: true,
       steps: [
         ['s', 'start', 'Invoice received', 'Accounts Payable'],
-        ['cap', 'task', 'Capture invoice', 'Accounts Payable', { role: 'AP Clerk', systems: ['Coupa'], minutes: 5 }],
+        ['cap', 'task', 'Capture invoice', 'Accounts Payable', { role: 'AP Clerk', systems: ['Coupa'], minutes: 5, agent: 'Invoice Capture Agent', level: 'autonomous', oversight: 'Low-confidence extractions go to the AP Clerk queue; AP Lead samples 5% of captures daily' }],
         ['gr', 'task', 'Confirm goods receipt', 'Operations', { role: 'Requester', systems: ['Coupa'], minutes: 5 }],
         ['match', 'decision', 'Three-way match OK?', null, { risks: ['Duplicate or erroneous invoice payment'], controls: ['Three-way match (PO / receipt / invoice)'] }],
         ['exc', 'task', 'Resolve exception with buyer', 'Procurement', { role: 'Buyer', minutes: 45 }],
-        ['post', 'task', 'Post invoice', 'Accounts Payable', { role: 'AP Clerk', systems: ['SAP S/4HANA'], minutes: 5 }],
+        ['post', 'task', 'Post invoice', 'Accounts Payable', { role: 'AP Clerk', systems: ['SAP S/4HANA'], minutes: 5, agent: 'Invoice Capture Agent', level: 'supervised', oversight: 'AP Clerk approves each proposed posting before release' }],
         ['run', 'task', 'Propose payment run', 'Accounts Payable', { role: 'AP Lead', systems: ['SAP S/4HANA'], minutes: 30 }],
         ['rel', 'task', 'Approve & release payments', 'Treasury', { role: 'Treasury Manager', systems: ['Bank Portal'], risks: ['Unauthorised payment release'], controls: ['Dual authorisation of payment runs'], minutes: 20 }],
         ['e', 'end', 'Supplier paid', 'Treasury'],
@@ -184,7 +184,7 @@ export async function seedDemoData(executor: Executor, actor: Actor): Promise<vo
         ['s', 'start', 'Offer accepted', 'People Team'],
         ['hr', 'task', 'Create worker record', 'People Team', { role: 'HR Coordinator', systems: ['Workday'], minutes: 20 }],
         ['ticket', 'task', 'Raise IT onboarding ticket', 'People Team', { systems: ['ServiceNow'], minutes: 5 }],
-        ['acc', 'task', 'Provision accounts & access', 'IT Service Desk', { systems: ['Okta', 'ServiceNow'], risks: ['Excessive system access for new joiners'], controls: ['Access provisioning approval'], minutes: 60 }],
+        ['acc', 'task', 'Provision accounts & access', 'IT Service Desk', { systems: ['Okta', 'ServiceNow'], risks: ['Excessive system access for new joiners'], controls: ['Access provisioning approval'], minutes: 60, agent: 'IT Onboarding Agent', level: 'supervised', oversight: 'Service desk analyst approves the proposed access bundle; hiring manager approves privileged access' }],
         ['hw', 'task', 'Prepare laptop', 'IT Service Desk', { minutes: 90 }],
         ['day1', 'task', 'Day-one induction', 'People Team', { minutes: 240 }],
         ['e', 'end', 'Employee productive', 'Operations'],
@@ -225,12 +225,80 @@ export async function seedDemoData(executor: Executor, actor: Actor): Promise<vo
         ['tri', 'decision', 'Delivery issue?', null],
         ['wh', 'task', 'Investigate shipment', 'Warehouse', { systems: ['SAP S/4HANA'], minutes: 60 }],
         ['sales', 'task', 'Agree commercial remedy', 'Sales', { systems: ['Salesforce'], minutes: 30 }],
-        ['resp', 'task', 'Respond to customer', 'Customer Service', { systems: ['Zendesk'], minutes: 15 }],
+        ['resp', 'task', 'Respond to customer', 'Customer Service', { systems: ['Zendesk'], minutes: 15, agent: 'Customer Reply Drafting Agent', level: 'assisted', oversight: 'Customer service agent edits and sends every reply' }],
         ['e', 'end', 'Complaint closed', 'Customer Service'],
       ],
       flows: [['s', 'log'], ['log', 'tri'], ['tri', 'wh', 'Yes'], ['tri', 'sales', 'No'], ['wh', 'resp'], ['sales', 'resp'], ['resp', 'e']],
     },
   ];
+
+  // AI agents that some steps are delegated to.
+  const agentSpecs: Array<{ name: string; description: string; provider: string; model?: string; platform: string; owner: string; status: string; riskTier: string; dataAccess: string; systems: string[] }> = [
+    {
+      name: 'Invoice Capture Agent',
+      description: 'Reads supplier invoices (PDF/e-mail), extracts header and line data, matches to POs and prepares postings.',
+      provider: 'Anthropic',
+      model: 'Claude',
+      platform: 'Claude Agent SDK on internal Kubernetes',
+      owner: 'Accounts Payable',
+      status: 'production',
+      riskTier: 'limited',
+      dataAccess: 'Supplier invoices and PO data (Confidential). Read/write in Coupa; post-only role in SAP.',
+      systems: ['Coupa', 'SAP S/4HANA'],
+    },
+    {
+      name: 'Sanctions Screening Assistant',
+      description: 'Screens new suppliers against sanctions and adverse-media sources and drafts a risk summary for the analyst.',
+      provider: 'In-house',
+      platform: 'Compliance analytics platform',
+      owner: 'Compliance',
+      status: 'pilot',
+      riskTier: 'high',
+      dataAccess: 'Supplier KYC records (Restricted). Read-only.',
+      systems: ['Coupa'],
+    },
+    {
+      name: 'IT Onboarding Agent',
+      description: 'Builds the access bundle for a new joiner from their role and raises provisioning requests.',
+      provider: 'Anthropic',
+      model: 'Claude',
+      platform: 'ServiceNow + MCP',
+      owner: 'IT Service Desk',
+      status: 'production',
+      riskTier: 'limited',
+      dataAccess: 'Worker profile (Internal). Can request, not grant, access.',
+      systems: ['ServiceNow', 'Okta', 'Workday'],
+    },
+    {
+      name: 'Customer Reply Drafting Agent',
+      description: 'Drafts empathetic replies to customer complaints from the case history for an agent to edit and send.',
+      provider: 'Anthropic',
+      model: 'Claude',
+      platform: 'Zendesk app',
+      owner: 'Customer Service',
+      status: 'pilot',
+      riskTier: 'minimal',
+      dataAccess: 'Customer case history (Confidential). No send permission.',
+      systems: ['Zendesk'],
+    },
+  ];
+  const agents: Record<string, string> = {};
+  for (const a of agentSpecs) {
+    agents[a.name] = (
+      await run<{ id: string }>('agent.create', {
+        name: a.name,
+        description: a.description,
+        provider: a.provider,
+        model: a.model ?? null,
+        platform: a.platform,
+        ownerTeamId: teams[a.owner],
+        status: a.status,
+        riskTier: a.riskTier,
+        dataAccess: a.dataAccess,
+        systemIds: a.systems.map((x) => systems[x]),
+      })
+    ).id;
+  }
 
   const created: Record<string, string> = {};
   for (const spec of specs) {
@@ -246,6 +314,9 @@ export async function seedDemoData(executor: Executor, actor: Actor): Promise<vo
       systemIds: (x?.systems ?? []).map((s) => systems[s]),
       riskIds: (x?.risks ?? []).map((r) => risks[r]),
       controlIds: (x?.controls ?? []).map((c) => controls[c]),
+      agentId: x?.agent ? agents[x.agent] : null,
+      automationLevel: x?.level ?? 'manual',
+      oversight: x?.oversight ?? null,
     }));
     const edges = spec.flows.map(([source, target, label]) => ({ source, target, label: label ?? null }));
     const p = await run<{ id: string }>('process.create', {

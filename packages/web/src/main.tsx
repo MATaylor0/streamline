@@ -19,6 +19,7 @@ import { SystemsPage, SystemPage } from './pages/Systems';
 import { RisksPage, RiskPage, ControlsPage, ControlPage } from './pages/RisksControls';
 import { RcmPage } from './pages/Rcm';
 import { TagsPage } from './pages/Tags';
+import { AgentsPage, AgentPage } from './pages/Agents';
 import { ProfilePage } from './pages/Profile';
 import { IntegrationsPage } from './pages/Integrations';
 import { UsersPage } from './pages/admin/Users';
@@ -77,6 +78,8 @@ function App() {
         <Route path="controls/:id" element={<ControlPage />} />
         <Route path="rcm" element={<RcmPage />} />
         <Route path="tags" element={<TagsPage />} />
+        <Route path="agents" element={<AgentsPage />} />
+        <Route path="agents/:id" element={<AgentPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="admin/users" element={<RequirePermission permission="admin:users"><UsersPage /></RequirePermission>} />

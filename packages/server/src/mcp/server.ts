@@ -23,6 +23,7 @@ Model:
 - Node types: start, end, task, decision (label outgoing edges e.g. "Yes"/"No"), subprocess (linkedProcessId = called process), event, document, system, note.
 - Steps reference catalog items by id: teamId (who performs it), systemIds (business applications), riskIds, controlIds.
 - Lifecycle: draft → submitForReview → in_review → publish (approver) → published; editing a published process makes it a draft again. Archive to retire.
+- AI delegation: steps (or whole processes) can be delegated to a registered AI agent (agent_list / agent_create) with automationLevel manual | assisted | supervised | autonomous and a description of human oversight. Supervised/autonomous work must name its agent and its oversight before the process can be submitted. analytics_aiDelegation is the AI register.
 
 Tips:
 - Look up ids first with team_list, system_list, risk_list, control_list (create missing ones if permitted).

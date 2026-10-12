@@ -3,7 +3,7 @@ import { Field, Modal, MultiSelect, type Option } from './ui';
 import { useAction } from '../hooks';
 
 export type FieldDef =
-  | { key: string; label: string; type: 'text' | 'textarea' | 'url' | 'color'; hint?: string; required?: boolean }
+  | { key: string; label: string; type: 'text' | 'textarea' | 'url' | 'color' | 'date'; hint?: string; required?: boolean }
   | { key: string; label: string; type: 'number'; min?: number; max?: number; hint?: string }
   | { key: string; label: string; type: 'select'; options: Option[]; hint?: string; allowEmpty?: boolean; numeric?: boolean }
   | { key: string; label: string; type: 'multi'; options: Option[]; hint?: string };
@@ -94,7 +94,7 @@ export function EntityForm({
             ) : f.type === 'color' ? (
               <input type="color" value={String(values[f.key] ?? '#2563eb')} onChange={(e) => set(f.key, e.target.value)} />
             ) : (
-              <input type={f.type === 'url' ? 'url' : 'text'} value={String(values[f.key] ?? '')} onChange={(e) => set(f.key, e.target.value)} autoFocus={f === fields[0]} />
+              <input type={f.type === 'url' ? 'url' : f.type === 'date' ? 'date' : 'text'} value={String(values[f.key] ?? '')} onChange={(e) => set(f.key, e.target.value)} autoFocus={f === fields[0]} />
             )}
           </Field>
         ))}

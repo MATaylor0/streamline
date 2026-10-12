@@ -27,10 +27,11 @@ import { toastApi, useAction, useOp } from '../hooks';
 import type { NodeType, ProcessFull, StepNode } from '../types';
 import { Field, MultiSelect, timeAgo } from './ui';
 import { IconLanes, IconLayout, IconSave, IconTrash } from './icons';
+import { AiBadge, LEVELS, delegationIssue, levelInfo } from './ai';
 
 // ------------------------------------------------------------------ node rendering
 
-type StepData = { step: StepNode; teamName?: string; teamColor?: string; comments?: number; linkedName?: string };
+type StepData = { step: StepNode; teamName?: string; teamColor?: string; comments?: number; linkedName?: string; agentName?: string };
 type LaneData = { name: string; color: string; width: number; height: number };
 type FlowNode = Node<StepData, 'box' | 'round' | 'diamond'> | Node<LaneData, 'lane'>;
 
@@ -76,6 +77,12 @@ const BoxNode = memo(({ data, selected }: NodeProps<Node<StepData, 'box'>>) => {
           {s.type === 'subprocess' && <span>↳ {data.linkedName ?? 'not linked'}</span>}
         </div>
       )}
+      {s.automationLevel !== 'manual' && (
+        <div className={`pn-ai ${s.automationLevel}`} title={levelInfo(s.automationLevel).help}>
+          🤖 {levelInfo(s.automationLevel).short}
+          {data.agentName ? ` · ${data.agentName}` : ' · no agent'}
+        </div>
+      )}
       {(s.systemIds.length > 0 || s.riskIds.length > 0 || s.controlIds.length > 0 || data.comments || s.durationMinutes) && (
         <div className="pn-icons">
           {s.systemIds.length > 0 && <span className="pn-chip" style={{ background: 'var(--primary-soft)', color: 'var(--primary)' }}>{s.systemIds.length} sys</span>}
@@ -89,6 +96,13 @@ const BoxNode = memo(({ data, selected }: NodeProps<Node<StepData, 'box'>>) => {
   );
 });
 
+const AiDot = ({ step }: { step: StepNode }) =>
+  step.automationLevel === 'manual' ? null : (
+    <span className={`ai-dot ${step.automationLevel}`} title={`AI ${levelInfo(step.automationLevel).short.toLowerCase()}`}>
+      🤖
+    </span>
+  );
+
 const RoundNode = memo(({ data, selected }: NodeProps<Node<StepData, 'round'>>) => (
   <div className={`round-node ${data.step.type} ${selected ? 'selected' : ''}`} title={data.step.label}>
     <Handles />
@@ -101,6 +115,7 @@ const DiamondNode = memo(({ data, selected }: NodeProps<Node<StepData, 'diamond'
     <div className="diamond" />
     <Handles />
     <span className="q">?</span>
+    <AiDot step={data.step} />
     <span className="round-label" style={{ top: 72 }}>
       {data.step.label}
     </span>
@@ -238,9 +253,10 @@ function Editor({ process, editable, onSaved, onDirtyChange }: Props) {
         teamColor: team?.color,
         comments: commentCounts.get(step.id),
         linkedName: step.linkedProcessId ? catalog.processes.find((p) => p.id === step.linkedProcessId)?.name : undefined,
+        agentName: step.agentId ? catalog.agentMap.get(step.agentId)?.name : undefined,
       };
     },
-    [catalog.teamMap, catalog.processes, commentCounts],
+    [catalog.teamMap, catalog.processes, catalog.agentMap, commentCounts],
   );
 
   const initialNodes = useMemo<FlowNode[]>(
@@ -334,6 +350,9 @@ function Editor({ process, editable, onSaved, onDirtyChange }: Props) {
       systemIds: [],
       riskIds: [],
       controlIds: [],
+      agentId: null,
+      automationLevel: 'manual',
+      oversight: null,
     };
     setNodes((ns) => [...ns.map((n) => ({ ...n, selected: false })), { id, type: shapeOf(type), position, data: decorate(step), selected: true } as FlowNode]);
     // Auto-connect from the currently selected step for fast keyboard-free mapping.
@@ -383,6 +402,9 @@ function Editor({ process, editable, onSaved, onDirtyChange }: Props) {
             systemIds: s.systemIds,
             riskIds: s.riskIds,
             controlIds: s.controlIds,
+            agentId: s.automationLevel === 'manual' ? null : s.agentId,
+            automationLevel: s.automationLevel,
+            oversight: s.automationLevel === 'manual' ? null : s.oversight || null,
           };
         }),
         edges: edges.filter((e) => steps.some((n) => n.id === e.source) && steps.some((n) => n.id === e.target)).map((e) => ({ source: e.source, target: e.target, label: typeof e.label === 'string' && e.label ? e.label : null })),
@@ -646,6 +668,7 @@ function NodeInspector({ step, editable, onChange, processId }: { step: StepNode
               </button>
             )}
           </Field>
+          <AiDelegationFields value={step} editable={editable} onChange={onChange} />
           <Field label="Inputs">
             <input disabled={!editable} value={step.inputs ?? ''} onChange={(e) => onChange({ inputs: e.target.value })} />
           </Field>
@@ -711,8 +734,10 @@ function DiagramChecks({ steps, edges, editable, selectedCount }: { steps: StepN
     if (s.type === 'decision' && edges.some((e) => e.source === s.id && !e.label)) issues.push(`Label the outcomes of "${s.label}"`);
     if (['task', 'document', 'system', 'subprocess'].includes(s.type) && !s.teamId) issues.push(`"${s.label}" has no responsible team`);
     if (s.type === 'subprocess' && !s.linkedProcessId) issues.push(`Sub-process "${s.label}" is not linked`);
+    issues.push(...delegationIssue(s));
   }
   const total = steps.reduce((a, s) => a + (s.durationMinutes ?? 0), 0);
+  const aiSteps = steps.filter((s) => s.automationLevel !== 'manual');
   return (
     <div className="stack">
       <h2>Diagram</h2>
@@ -726,6 +751,19 @@ function DiagramChecks({ steps, edges, editable, selectedCount }: { steps: StepN
         <dd>{new Set(steps.map((s) => s.teamId).filter(Boolean)).size}</dd>
         <dt>Total effort</dt>
         <dd>{total ? `${Math.round(total / 6) / 10} h` : '—'}</dd>
+        <dt>AI-delegated</dt>
+        <dd>
+          {aiSteps.length ? (
+            <span className="row wrap" style={{ gap: 4 }}>
+              {(['assisted', 'supervised', 'autonomous'] as const).map((l) => {
+                const n = aiSteps.filter((s) => s.automationLevel === l).length;
+                return n ? <AiBadge key={l} level={l} agent={`${n}`} /> : null;
+              })}
+            </span>
+          ) : (
+            'None'
+          )}
+        </dd>
       </dl>
       <h3>Quality checks</h3>
       {issues.length ? (
@@ -745,6 +783,79 @@ function DiagramChecks({ steps, edges, editable, selectedCount }: { steps: StepN
           <span>Drag from a node's edge handle to connect. Select and press Delete to remove.</span>
           <span>Use Swimlanes to arrange the flow by responsible team. Ctrl/⌘+S saves.</span>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** "AI delegation" section, shared by the step inspector and the process details form. */
+export function AiDelegationFields({
+  value,
+  editable,
+  onChange,
+  scope = 'step',
+}: {
+  value: { agentId: string | null; automationLevel: StepNode['automationLevel']; oversight: string | null };
+  editable: boolean;
+  onChange: (p: Partial<Pick<StepNode, 'agentId' | 'automationLevel' | 'oversight'>>) => void;
+  scope?: 'step' | 'process';
+}) {
+  const catalog = useCatalog();
+  const { can } = useAuth();
+  const level = value.automationLevel;
+  const agent = value.agentId ? catalog.agentMap.get(value.agentId) : undefined;
+  const createAgent = async () => {
+    const name = window.prompt('Name of the AI agent to register');
+    if (!name) return;
+    try {
+      const created = await call<{ id: string }>('agent.create', { name });
+      onChange({ agentId: created.id });
+      toastApi.show('Agent registered (status: proposed). Complete its details under AI agents.', 'success');
+    } catch (err) {
+      toastApi.show(err instanceof ApiError ? err.friendly : 'Failed', 'error');
+    }
+  };
+  return (
+    <div className="ai-section stack" style={{ gap: 10 }}>
+      <div className="row">
+        <h3 style={{ flex: 1 }}>🤖 AI delegation</h3>
+        {agent && (
+          <Link to={`/agents/${agent.id}`} className="small">
+            Agent →
+          </Link>
+        )}
+      </div>
+      <Field label={scope === 'process' ? 'Whole process is' : 'This step is'} hint={levelInfo(level).help}>
+        <select disabled={!editable} value={level} onChange={(e) => onChange({ automationLevel: e.target.value as StepNode['automationLevel'] })}>
+          {LEVELS.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {level !== 'manual' && (
+        <>
+          <Field label="AI agent">
+            <select disabled={!editable} value={value.agentId ?? ''} onChange={(e) => onChange({ agentId: e.target.value || null })}>
+              <option value="">— Select an agent —</option>
+              {catalog.agentOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label} ({o.hint})
+                </option>
+              ))}
+            </select>
+            {editable && can('catalog:write') && (
+              <button type="button" className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => void createAgent()}>
+                + Register new agent
+              </button>
+            )}
+            {agent && agent.status !== 'production' && <span className="hint" style={{ color: 'var(--warning)' }}>Agent status: {agent.status}</span>}
+          </Field>
+          <Field label="Human oversight" hint="Who reviews the agent's work, how exceptions escalate, how to stop it.">
+            <textarea disabled={!editable} rows={3} value={value.oversight ?? ''} onChange={(e) => onChange({ oversight: e.target.value })} />
+          </Field>
+        </>
       )}
     </div>
   );

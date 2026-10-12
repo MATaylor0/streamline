@@ -37,4 +37,5 @@ export const IconLogout = (p: P) => base(['M15 4h4v16h-4', 'M10 8l-4 4 4 4', 'M6
 export const IconCopy = (p: P) => base(['M9 9h11v11H9z', 'M5 15H4V4h11v1'], p);
 export const IconExternal = (p: P) => base(['M14 4h6v6', 'M20 4l-9 9', 'M18 14v6H4V6h6'], p);
 export const IconCheck = (p: P) => base(['M5 12l5 5 9-10'], p);
+export const IconBot = (p: P) => base(['M5 9h14v10H5z', 'M12 5v4', 'M12 4.5h.01', 'M9 13h.01', 'M15 13h.01', 'M9.5 16.5h5', 'M3 13v3', 'M21 13v3'], p);
 export const IconMap = (p: P) => base(['M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z', 'M9 4v14', 'M15 6v14'], p);

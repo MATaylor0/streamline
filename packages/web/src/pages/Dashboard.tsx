@@ -11,6 +11,7 @@ interface Overview {
   risksWithoutControls: number;
   controlsByEffectiveness: Record<string, number>;
   processesWithoutOwner: number;
+  stepsByAutomationLevel: Record<string, number>;
   reviewsDue: Array<{ id: string; ref: string; name: string; nextReviewAt: string; overdue: boolean }>;
   recentlyUpdated: Array<{ id: string; ref: string; name: string; status: string; updatedAt: string }>;
 }
@@ -67,7 +68,7 @@ export function DashboardPage() {
         <Stat label="Awaiting review" value={d.processesByStatus.in_review ?? 0} to="/processes?status=in_review" />
         <Stat label="Business systems" value={d.totals.systems} to="/systems" />
       </div>
-      <div className="grid grid-3" style={{ marginBottom: 16 }}>
+      <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <div className="card">
           <div className="card-header">
             <h2>Process status</h2>
@@ -101,6 +102,21 @@ export function DashboardPage() {
               data={d.controlsByEffectiveness}
               colors={{ effective: '#16a34a', partially_effective: '#d97706', ineffective: '#dc2626', not_tested: '#94a3b8' }}
               labels={{ effective: 'Effective', partially_effective: 'Partial', ineffective: 'Ineffective', not_tested: 'Not tested' }}
+            />
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-header">
+            <h2>AI delegation</h2>
+            <Link to="/agents" className="small">
+              Register →
+            </Link>
+          </div>
+          <div className="card-body">
+            <Breakdown
+              data={d.stepsByAutomationLevel}
+              colors={{ manual: '#94a3b8', assisted: '#2563eb', supervised: '#7c3aed', autonomous: '#d97706' }}
+              labels={{ manual: 'Manual', assisted: 'Assisted', supervised: 'Supervised', autonomous: 'Autonomous' }}
             />
           </div>
         </div>

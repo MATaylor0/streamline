@@ -5,6 +5,7 @@ import { useLocalStorage } from '../hooks';
 import { initials } from './ui';
 import {
   IconAlert,
+  IconBot,
   IconFlow,
   IconGrid,
   IconHome,
@@ -92,6 +93,9 @@ export function Layout() {
           </Item>
           <Item to="/controls" icon={<IconShield />}>
             Controls
+          </Item>
+          <Item to="/agents" icon={<IconBot />}>
+            AI agents
           </Item>
           <Item to="/rcm" icon={<IconGrid />}>
             Risk &amp; control matrix

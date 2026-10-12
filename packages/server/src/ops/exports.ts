@@ -45,6 +45,18 @@ export function orderSteps(snap: Snapshot): SNode[] {
   return [...order.filter((n) => n.type !== 'end'), ...order.filter((n) => n.type === 'end')];
 }
 
+const LEVEL_TEXT: Record<string, string> = {
+  assisted: 'AI-assisted (a person performs and decides)',
+  supervised: 'performed by AI, human-reviewed (human-in-the-loop)',
+  autonomous: 'performed autonomously by AI (human-on-the-loop)',
+};
+
+/** One-line description of an AI delegation, or '' for manual work. */
+export function delegationLine(d: { agent?: { name: string } | null; automationLevel: string; oversight?: string | null }): string {
+  if (d.automationLevel === 'manual') return '';
+  return `AI delegation: ${d.agent?.name ?? 'unassigned agent'} — ${LEVEL_TEXT[d.automationLevel] ?? d.automationLevel}${d.oversight ? `; oversight: ${d.oversight}` : ''}`;
+}
+
 // ------------------------------------------------------------------ BPMN 2.0
 
 const BPMN_SIZE: Record<string, [number, number]> = {
@@ -74,7 +86,7 @@ export function toBpmn(snap: Snapshot): string {
   const el = (n: SNode): string => {
     const inc = flows.filter((f) => f.target === n.id).map((f) => `<bpmn:incoming>${f.id}</bpmn:incoming>`).join('');
     const outg = flows.filter((f) => f.source === n.id).map((f) => `<bpmn:outgoing>${f.id}</bpmn:outgoing>`).join('');
-    const doc = [n.description, n.actorRole ? `Role: ${n.actorRole}` : '', n.systems.length ? `Systems: ${n.systems.map((s) => s.name).join(', ')}` : '', n.risks.length ? `Risks: ${n.risks.map((r) => r.title).join('; ')}` : '', n.controls.length ? `Controls: ${n.controls.map((c) => c.name).join('; ')}` : '']
+    const doc = [n.description, n.actorRole ? `Role: ${n.actorRole}` : '', n.systems.length ? `Systems: ${n.systems.map((s) => s.name).join(', ')}` : '', n.risks.length ? `Risks: ${n.risks.map((r) => r.title).join('; ')}` : '', n.controls.length ? `Controls: ${n.controls.map((c) => c.name).join('; ')}` : '', delegationLine(n)]
       .filter(Boolean)
       .join('\n');
     const body = `${doc ? `<bpmn:documentation>${xml(doc)}</bpmn:documentation>` : ''}${inc}${outg}`;
@@ -92,8 +104,11 @@ export function toBpmn(snap: Snapshot): string {
         return `<bpmn:callActivity ${attrs}${n.linkedProcess?.ref ? ` calledElement="${xml(n.linkedProcess.ref)}"` : ''}>${body}</bpmn:callActivity>`;
       case 'system':
         return `<bpmn:serviceTask ${attrs}>${body}</bpmn:serviceTask>`;
-      default:
-        return `<bpmn:${n.actorRole || n.team ? 'userTask' : 'task'} ${attrs}>${body}</bpmn:${n.actorRole || n.team ? 'userTask' : 'task'}>`;
+      default: {
+        // Autonomous AI work is an automated (service) task; everything else involves people.
+        const tag = n.automationLevel === 'autonomous' ? 'serviceTask' : n.actorRole || n.team ? 'userTask' : 'task';
+        return `<bpmn:${tag} ${attrs}>${body}</bpmn:${tag}>`;
+      }
     }
   };
 
@@ -201,6 +216,7 @@ export function toMarkdown(snap: Snapshot, meta: { status?: string; owner?: stri
     ['Owning team', p.ownerTeam?.name],
     ['Process owner', meta.owner],
     ['Tags', p.tags.join(', ')],
+    ['AI delegation', p.automationLevel !== 'manual' ? delegationLine(p).replace(/^AI delegation: /, '') : null],
   ];
   out.push('| | |', '|---|---|', ...rows.filter(([, v]) => v).map(([k, v]) => `| ${k} | ${String(v).replace(/\|/g, '\\|')} |`), '');
   if (p.summary) out.push(`> ${p.summary}`, '');
@@ -220,6 +236,7 @@ export function toMarkdown(snap: Snapshot, meta: { status?: string; owner?: stri
     if (s.outputs) out.push(`**Outputs:** ${s.outputs}  `);
     if (s.risks.length) out.push(`**Risks:** ${s.risks.map((r) => `${r.ref ?? ''} ${r.title}`.trim()).join('; ')}  `);
     if (s.controls.length) out.push(`**Controls:** ${s.controls.map((c) => `${c.ref ?? ''} ${c.name}`.trim()).join('; ')}  `);
+    if (s.automationLevel !== 'manual') out.push(`**AI delegation:** ${delegationLine(s).replace(/^AI delegation: /, '')}  `);
     if (s.description) out.push('', s.description);
     const next = snap.edges.filter((e) => e.source === s.id);
     if (next.length) {

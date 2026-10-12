@@ -4,6 +4,7 @@ import { Kysely, PostgresDialect, SqliteDialect } from 'kysely';
 import { Migrator, type Migration, type MigrationProvider } from 'kysely/migration';
 import type { Database } from './schema.js';
 import * as m001 from './migrations/001_initial.js';
+import * as m002 from './migrations/002_ai_agents.js';
 
 export type Dialect = 'postgres' | 'sqlite';
 
@@ -23,6 +24,7 @@ export interface DatabaseOptions {
 /** Migrations are bundled in code (not discovered on disk) so builds stay self-contained. */
 const migrations: Record<string, Migration> = {
   '001_initial': m001,
+  '002_ai_agents': m002,
 };
 
 class StaticMigrationProvider implements MigrationProvider {

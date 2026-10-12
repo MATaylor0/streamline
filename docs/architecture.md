@@ -80,6 +80,9 @@ processes ─< nodes ─< node_systems >─ systems
   ├─< process_tags >─ tags
   ├─< process_versions (immutable JSON snapshot per publish)
   └─< comments (optionally anchored to a node)
+agents ─< agent_systems >─ systems        (AI agent register; agents.service_account_id → users)
+nodes.agent_id / processes.agent_id → agents, with automation_level
+  (manual | assisted | supervised | autonomous) and oversight text
 audit_log · settings · webhooks · counters (PRC-0001, RSK-001, CTL-001)
 ```
 
@@ -91,6 +94,7 @@ audit_log · settings · webhooks · counters (PRC-0001, RSK-001, CTL-001)
 
 - **Team interaction map**: for every step owned by team A, follow outgoing flows (passing through unassigned gateways) to the next steps that have a team. Every A→B where A≠B counts as one handoff. Links carry the processes and step pairs behind them.
 - **Process landscape**: processes as nodes, sub-process steps as call links.
+- **AI delegation**: a step's responsible team stays accountable even when an agent does the work. With `includeAgents`, steps an agent *performs* (supervised or autonomous) are attributed to that agent in the interaction map, so handoffs to and from AI appear. `analytics.aiDelegation` builds the AI register and its governance gaps.
 - **Risk & control matrix**: a risk counts as *controlled* in a process when at least one of its mitigating controls is performed on a step of that process.
 - **Search**: AND across terms, OR across each entity's text fields (plus tag names for processes), LIKE-based so it works the same on both databases. Results are ranked by field weight and match type. A dialect-specific full-text index can replace this behind the same operation if the corpus gets large.
 

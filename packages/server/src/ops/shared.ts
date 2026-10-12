@@ -8,6 +8,20 @@ import { nowIso, parseJson, uniq } from '../lib/util.js';
 // ---------------------------------------------------------------- schemas
 
 export const Id = z.string().min(1).max(64).describe('Identifier (UUID)');
+
+/**
+ * Make every field optional *without* defaults, for partial updates. (In Zod 4
+ * `.optional()` on a defaulted field still fills the default in, which would
+ * overwrite stored values the caller did not mention.)
+ */
+export function partialShape<T extends Record<string, z.ZodType>>(shape: T): { [K in keyof T]: z.ZodOptional<z.ZodType<z.output<T[K]>, z.input<T[K]>>> } {
+  const out: Record<string, z.ZodType> = {};
+  for (const [k, v] of Object.entries(shape)) {
+    const inner = v instanceof z.ZodDefault ? (v.unwrap() as z.ZodType) : v;
+    out[k] = (v.description ? inner.describe(v.description) : inner).optional();
+  }
+  return out as never;
+}
 export const OptionalText = (max = 10_000) => z.string().max(max).nullish();
 
 export const Pagination = {
@@ -32,6 +46,20 @@ export const CONTROL_TYPES = ['preventive', 'detective', 'corrective'] as const;
 export const CONTROL_NATURES = ['manual', 'automated', 'it_dependent'] as const;
 export const EFFECTIVENESS = ['not_tested', 'effective', 'partially_effective', 'ineffective'] as const;
 
+/**
+ * How much of a step (or process) is delegated to an AI agent:
+ * - manual: people only
+ * - assisted: the agent drafts or recommends; a person performs the step and decides
+ * - supervised: the agent performs the step; a person reviews or approves each output (human-in-the-loop)
+ * - autonomous: the agent performs the step end to end; people monitor and handle exceptions (human-on-the-loop)
+ */
+export const AUTOMATION_LEVELS = ['manual', 'assisted', 'supervised', 'autonomous'] as const;
+export type AutomationLevel = (typeof AUTOMATION_LEVELS)[number];
+/** Levels where the agent itself carries out the work. */
+export const AGENT_EXECUTED: ReadonlySet<string> = new Set(['supervised', 'autonomous']);
+export const AGENT_STATUSES = ['proposed', 'pilot', 'production', 'suspended', 'retired'] as const;
+export const AGENT_RISK_TIERS = ['minimal', 'limited', 'high'] as const;
+
 export interface Page<T> {
   items: T[];
   total: number;
@@ -55,6 +83,10 @@ export const SettingsSchema = z.object({
   defaultReviewIntervalDays: z.number().int().min(0).max(3650).default(365),
   processRefPrefix: z.string().regex(/^[A-Z][A-Z0-9]{0,9}$/).default('PRC'),
   loginBanner: z.string().max(2000).default(''),
+  requireAiOversight: z
+    .boolean()
+    .default(true)
+    .describe('Block publishing when a step or process delegated to AI (supervised/autonomous) has no agent or no human oversight described'),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -96,7 +128,7 @@ export async function loadProcess(db: DB, id: string): Promise<ProcessRow> {
   return row;
 }
 
-export async function assertExists(db: DB, table: 'teams' | 'systems' | 'risks' | 'controls' | 'users' | 'processes', ids: Array<string | null | undefined>, label: string) {
+export async function assertExists(db: DB, table: 'teams' | 'systems' | 'risks' | 'controls' | 'users' | 'processes' | 'agents', ids: Array<string | null | undefined>, label: string) {
   const wanted = uniq(ids.filter((v): v is string => Boolean(v)));
   if (!wanted.length) return;
   const found = await db.selectFrom(table).select('id').where('id', 'in', wanted).execute();
@@ -165,7 +197,7 @@ export interface TeamRef {
 export async function processDtos(db: DB, rows: ProcessRow[]) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const [tags, teams, users, counts] = await Promise.all([
+  const [tags, teams, users, counts, agents] = await Promise.all([
     db
       .selectFrom('process_tags')
       .innerJoin('tags', 'tags.id', 'process_tags.tag_id')
@@ -189,7 +221,13 @@ export async function processDtos(db: DB, rows: ProcessRow[]) {
       .where('process_id', 'in', ids)
       .groupBy('process_id')
       .execute(),
+    db
+      .selectFrom('agents')
+      .select(['id', 'name', 'status'])
+      .where('id', 'in', uniq(rows.map((r) => r.agent_id ?? '')).filter(Boolean).concat(['-']))
+      .execute(),
   ]);
+  const agentMap = new Map(agents.map((a) => [a.id, a]));
   const teamMap = new Map(teams.map((t) => [t.id, t]));
   const userMap = new Map(users.map((u) => [u.id, u]));
   const countMap = new Map(counts.map((c) => [c.process_id, Number(c.n)]));
@@ -211,6 +249,9 @@ export async function processDtos(db: DB, rows: ProcessRow[]) {
     submittedBy: r.submitted_by,
     submittedAt: r.submitted_at,
     stepCount: countMap.get(r.id) ?? 0,
+    agent: r.agent_id ? (agentMap.get(r.agent_id) ?? null) : null,
+    automationLevel: r.automation_level as AutomationLevel,
+    oversight: r.oversight,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     updatedBy: r.updated_by ? (userMap.get(r.updated_by) ?? null) : null,
@@ -251,6 +292,9 @@ export async function nodeDtos(db: DB, nodes: NodeRow[]) {
     inputs: n.inputs,
     outputs: n.outputs,
     linkedProcessId: n.linked_process_id,
+    agentId: n.agent_id,
+    automationLevel: n.automation_level as AutomationLevel,
+    oversight: n.oversight,
     position: { x: Number(n.x), y: Number(n.y) },
     systemIds: s.get(n.id) ?? [],
     riskIds: r.get(n.id) ?? [],

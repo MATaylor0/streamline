@@ -4,12 +4,12 @@ import { defineOp } from '../core/operation.js';
 import { ForbiddenError, NotFoundError } from '../core/errors.js';
 import type { DB } from '../db/schema.js';
 import { addDays, likeEscape, newId, nowIso, toBool, uniq } from '../lib/util.js';
-import { Id, StringList, loadProcess } from './shared.js';
+import { AGENT_EXECUTED, Id, StringList, loadProcess } from './shared.js';
 import { riskRating } from './catalog.js';
 
 // =================================================================== search
 
-const SEARCH_TYPES = ['process', 'step', 'team', 'system', 'risk', 'control'] as const;
+const SEARCH_TYPES = ['process', 'step', 'team', 'system', 'risk', 'control', 'agent'] as const;
 type SearchType = (typeof SEARCH_TYPES)[number];
 
 export interface SearchHit {
@@ -129,6 +129,12 @@ export async function runSearch(db: DB, q: string, types: SearchType[], limit: n
     }
   }
 
+  if (want('agent')) {
+    for (const r of await db.selectFrom('agents').selectAll().where(termFilter(terms, ['name', 'description', 'provider', 'model', 'platform'])).limit(per).execute()) {
+      hits.push({ type: 'agent', id: r.id, title: r.name, subtitle: ['AI agent', r.status, r.provider, r.model].filter(Boolean).join(' · '), snippet: snippet(r.description, terms), processId: null, score: score([[r.name, 8], [r.provider, 3], [r.model, 3], [r.platform, 2], [r.description, 1]], terms) + 2 });
+    }
+  }
+
   return hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, limit);
 }
 
@@ -180,12 +186,12 @@ async function scopedProcesses(db: DB, scope: { statuses?: string[]; tag?: strin
  * a flow from a step owned by one team to the next step owned by a different
  * team; steps with no team (e.g. gateways) are traversed transparently.
  */
-export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag?: string; processIds?: string[] }) {
+export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag?: string; processIds?: string[]; includeAgents?: boolean }) {
   const processes = await scopedProcesses(db, scope);
   const pids = processes.map((p) => p.id).concat(['-']);
-  const [teams, nodes, edges, sysLinks] = await Promise.all([
+  const [teams, rawNodes, edges, sysLinks, agents] = await Promise.all([
     db.selectFrom('teams').selectAll().orderBy('name').execute(),
-    db.selectFrom('nodes').select(['id', 'process_id', 'team_id', 'label', 'type']).where('process_id', 'in', pids).execute(),
+    db.selectFrom('nodes').select(['id', 'process_id', 'team_id', 'label', 'type', 'agent_id', 'automation_level']).where('process_id', 'in', pids).execute(),
     db.selectFrom('edges').select(['process_id', 'source_node_id', 'target_node_id']).where('process_id', 'in', pids).execute(),
     db
       .selectFrom('node_systems')
@@ -193,7 +199,12 @@ export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag
       .select(['nodes.team_id', 'node_systems.target_id'])
       .where('nodes.process_id', 'in', pids)
       .execute(),
+    db.selectFrom('agents').select(['id', 'name', 'status', 'risk_tier']).orderBy('name').execute(),
   ]);
+  // The "actor" of a step is its team, or - when agents are included - the AI agent
+  // that performs it (supervised / autonomous delegation). Agent actor ids are "agent:<id>".
+  const agentActor = (n: (typeof rawNodes)[number]) => scope.includeAgents && n.agent_id && AGENT_EXECUTED.has(n.automation_level);
+  const nodes = rawNodes.map((n) => ({ ...n, actor: agentActor(n) ? `agent:${n.agent_id}` : n.team_id }));
   const pmap = new Map(processes.map((p) => [p.id, p]));
   const nmap = new Map(nodes.map((n) => [n.id, n]));
   const out = new Map<string, string[]>();
@@ -210,7 +221,7 @@ export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag
       seen.add(id);
       const n = nmap.get(id);
       if (!n) continue;
-      if (n.team_id) found.push(id);
+      if (n.actor) found.push(id);
       else stack.push(...(out.get(id) ?? []));
     }
     return found;
@@ -219,12 +230,12 @@ export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag
   type Link = { from: string; to: string; count: number; processes: Map<string, { id: string; ref: string; name: string; handoffs: Array<{ from: string; to: string }> }> };
   const links = new Map<string, Link>();
   for (const n of nodes) {
-    if (!n.team_id) continue;
+    if (!n.actor) continue;
     for (const tid of nextTeamed(n.id)) {
       const t = nmap.get(tid)!;
-      if (t.team_id === n.team_id) continue;
-      const key = `${n.team_id}>${t.team_id}`;
-      const link = links.get(key) ?? { from: n.team_id, to: t.team_id!, count: 0, processes: new Map() };
+      if (t.actor === n.actor) continue;
+      const key = `${n.actor}>${t.actor}`;
+      const link = links.get(key) ?? { from: n.actor, to: t.actor!, count: 0, processes: new Map() };
       link.count++;
       const p = pmap.get(n.process_id)!;
       const entry = link.processes.get(p.id) ?? { id: p.id, ref: p.ref, name: p.name, handoffs: [] };
@@ -235,7 +246,7 @@ export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag
   }
 
   const teamNodes = teams.map((t) => {
-    const mine = nodes.filter((n) => n.team_id === t.id);
+    const mine = nodes.filter((n) => n.actor === t.id);
     return {
       id: t.id,
       name: t.name,
@@ -250,13 +261,34 @@ export async function computeTeamGraph(db: DB, scope: { statuses?: string[]; tag
     };
   });
 
+  const agentNodes = scope.includeAgents
+    ? agents
+        .map((a) => {
+          const id = `agent:${a.id}`;
+          const mine = nodes.filter((n) => n.actor === id);
+          return {
+            id,
+            agentId: a.id,
+            name: a.name,
+            status: a.status,
+            riskTier: a.risk_tier,
+            stepCount: mine.length,
+            processCount: uniq(mine.map((n) => n.process_id)).length,
+            outgoingHandoffs: [...links.values()].filter((l) => l.from === id).reduce((acc, l) => acc + l.count, 0),
+            incomingHandoffs: [...links.values()].filter((l) => l.to === id).reduce((acc, l) => acc + l.count, 0),
+          };
+        })
+        .filter((a) => a.stepCount > 0)
+    : [];
+
   return {
     teams: teamNodes,
+    agents: agentNodes,
     links: [...links.values()]
       .map((l) => ({ source: l.from, target: l.to, count: l.count, processes: [...l.processes.values()] }))
       .sort((a, b) => b.count - a.count),
     processCount: processes.length,
-    unassignedStepCount: nodes.filter((n) => !n.team_id && !['start', 'end', 'note', 'decision'].includes(n.type)).length,
+    unassignedStepCount: nodes.filter((n) => !n.actor && !['start', 'end', 'note', 'decision'].includes(n.type)).length,
   };
 }
 
@@ -269,7 +301,13 @@ export const teamGraph = defineOp({
   permission: 'analytics:read',
   kind: 'read',
   http: { method: 'GET', path: '/analytics/team-interactions' },
-  input: z.object(ProcessScope),
+  input: z.object({
+    ...ProcessScope,
+    includeAgents: z.coerce
+      .boolean()
+      .default(false)
+      .describe('Show AI agents as participants: steps they perform (supervised/autonomous) are attributed to the agent instead of the accountable team'),
+  }),
   handler: async (ctx, input) => computeTeamGraph(ctx.db, input),
 });
 
@@ -326,10 +364,10 @@ export const overview = defineOp({
     const db = ctx.db;
     const now = nowIso();
     const horizon = addDays(now, input.reviewWindowDays);
-    const [byStatus, counts, risks, controls, reviewsDue, recent, unowned, riskLinks] = await Promise.all([
+    const [byStatus, counts, risks, controls, reviewsDue, recent, unowned, riskLinks, levels] = await Promise.all([
       db.selectFrom('processes').select(['status', (eb) => eb.fn.countAll<number>().as('n')]).groupBy('status').execute(),
       Promise.all(
-        (['nodes', 'teams', 'systems', 'risks', 'controls', 'users'] as const).map(async (t) =>
+        (['nodes', 'teams', 'systems', 'risks', 'controls', 'users', 'agents'] as const).map(async (t) =>
           [t, Number((await db.selectFrom(t).select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirst())?.n ?? 0)] as const,
         ),
       ),
@@ -347,6 +385,14 @@ export const overview = defineOp({
       db.selectFrom('processes').select(['id', 'ref', 'name', 'status', 'updated_at']).orderBy('updated_at', 'desc').limit(8).execute(),
       db.selectFrom('processes').select((eb) => eb.fn.countAll<number>().as('n')).where('owner_team_id', 'is', null).where('status', '!=', 'archived').executeTakeFirst(),
       db.selectFrom('risk_controls').select('risk_id').distinct().execute(),
+      db
+        .selectFrom('nodes')
+        .innerJoin('processes', 'processes.id', 'nodes.process_id')
+        .select(['nodes.automation_level', (eb) => eb.fn.countAll<number>().as('n')])
+        .where('processes.status', '!=', 'archived')
+        .where('nodes.type', 'not in', ['start', 'end', 'note', 'decision', 'event'])
+        .groupBy('nodes.automation_level')
+        .execute(),
     ]);
     const mitigated = new Set(riskLinks.map((r) => r.risk_id));
     const ratings: Record<string, number> = { low: 0, medium: 0, high: 0, critical: 0 };
@@ -358,6 +404,7 @@ export const overview = defineOp({
       risksWithoutControls: risks.filter((r) => r.status === 'open' && !mitigated.has(r.id)).length,
       controlsByEffectiveness: Object.fromEntries(controls.map((r) => [r.effectiveness, Number(r.n)])),
       processesWithoutOwner: Number(unowned?.n ?? 0),
+      stepsByAutomationLevel: Object.fromEntries(levels.map((r) => [r.automation_level, Number(r.n)])),
       reviewsDue: reviewsDue.map((r) => ({ id: r.id, ref: r.ref, name: r.name, nextReviewAt: r.next_review_at, overdue: (r.next_review_at ?? '') < now })),
       recentlyUpdated: recent.map((r) => ({ id: r.id, ref: r.ref, name: r.name, status: r.status, updatedAt: r.updated_at })),
     };

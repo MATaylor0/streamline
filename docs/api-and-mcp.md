@@ -103,4 +103,5 @@ claude mcp add --transport http streamline https://streamline.example.com/mcp \
 2. Create a whole process with `process_create`, passing `nodes` and `edges`. Give new nodes temporary ids such as `n1`, and omit positions so the server lays the diagram out.
 3. For restructuring, `process_get` and then `process_saveDiagram` with the full node list (keep existing ids) and `expectedRevision`.
 4. `process_export` with `format: "markdown"` gives a readable summary to show the user.
-5. Publishing requires `process:publish`, and by default someone other than the submitter. Agents normally stop at `process_submitForReview`.
+5. To record AI involvement, register the agent (`agent_create`). Then set `agentId`, `automationLevel` and `oversight` on the steps it handles, or on the process for end-to-end delegation. An agent documenting its own work should link its service account via `serviceAccountId`.
+6. Publishing requires `process:publish`, and by default someone other than the submitter. Agents normally stop at `process_submitForReview`.
